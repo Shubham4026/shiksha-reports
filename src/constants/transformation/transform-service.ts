@@ -429,9 +429,9 @@ export class TransformService {
         assessmentName: data.assessmentName,
         userId: data.userId,
         tenantId: data.tenantId,
-        totalMaxScore: data.totalMaxScore || 0,
-        totalScore: data.totalScore || 0,
-        timeSpent: parseInt(String(data.timeSpent)) || 0,
+        totalMaxScore: data.totalMaxScore,
+        totalScore: data.totalScore,
+        timeSpent: parseFloat(String(data.timeSpent)),
         assessmentSummary: JSON.stringify(data.assessmentSummary),
         attemptId: data.attemptId, // Use attemptId from source data
         assessmentType: data.assessmentType,
@@ -512,7 +512,7 @@ export class TransformService {
         contentName: contentName,
         contentType: data.contentType,
         contentTrackingStatus: contentTrackingStatus,
-        timeSpent: Math.round(totalTimeSpent), // Round to nearest integer
+        timeSpent: totalTimeSpent, // Round to nearest integer
         createdAt: data.createdOn ? new Date(data.createdOn) : new Date(),
         updatedAt: data.updatedOn ? new Date(data.updatedOn) : new Date(),
       };

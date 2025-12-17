@@ -24,7 +24,7 @@ export class AssessmentTracker {
     name: 'TotalMaxScore',
     type: 'numeric',
     precision: 10,
-    scale: 2,
+    scale: 5,
     nullable: false,
   })
   totalMaxScore: number;
@@ -33,12 +33,19 @@ export class AssessmentTracker {
     name: 'TotalScore',
     type: 'numeric',
     precision: 10,
-    scale: 2,
+    scale: 5,
     nullable: false,
   })
   totalScore: number;
 
-  @Column({ name: 'TimeSpent', type: 'int4', nullable: true, default: 0 })
+  @Column({ 
+    name: 'TimeSpent', 
+    type: 'numeric', 
+    precision: 18, 
+    scale: 5, 
+    nullable: true, 
+    default: 0 
+  })
   timeSpent?: number;
 
   @Column({ name: 'AssessmentSummary', type: 'text', nullable: true })
