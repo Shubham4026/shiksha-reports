@@ -26,9 +26,6 @@ export class Project {
   @Column({ nullable: true })
   Type: string;
 
-  @Column({ nullable: true })
-  School: string;
-
   @Column({ type: 'date', nullable: true })
   StartDate: Date;
 
@@ -41,6 +38,6 @@ export class Project {
   @Column({ type: 'uuid', nullable: true })
   TenantId: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'uuid', nullable: true })
   AcademicYear: string;
 }
