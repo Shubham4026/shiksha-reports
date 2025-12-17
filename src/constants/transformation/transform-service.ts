@@ -21,7 +21,11 @@ import { RegistrationTracker } from 'src/entities/registration-tracker.entity';
 import { Course } from 'src/entities/course.entity';
 import { QuestionSet } from 'src/entities/question-set.entity';
 import { Content } from 'src/entities/content.entity';
+import { Project } from 'src/entities/project.entity';
+import { ProjectTask } from 'src/entities/projectTask.entity';
+import { ProjectTaskTracking } from 'src/entities/projectTaskTracking.entity';
 import { ExternalCourseData, ExternalQuestionSetData, ExternalContentData } from 'src/types/cron.types';
+import { v4 as uuidv4 } from 'uuid';
 
 @Injectable()
 export class TransformService {
@@ -753,6 +757,242 @@ export class TransformService {
         identifier: data.identifier,
         error: error.message,
       });
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project data from Kafka event to Project entity format
+   */
+  async transformProjectData(data: any): Promise<Partial<Project>> {
+    try {
+      // Validate required fields
+      if (!data.solution?.solutionId) {
+        throw new Error('Solution ID is required');
+      }
+      if (!data.projectTemplate) {
+        throw new Error('Project template is required');
+      }
+
+      // Helper to safely parse dates
+      const parseDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null;
+        try {
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+          console.warn(`Failed to parse date: ${dateValue}`);
+          return null;
+        }
+      };
+
+      const transformedData: Partial<Project> = {
+        // ProjectId <- solutionId
+        ProjectId: data.solution.solutionId,
+        
+        // ProjectName <- projectTemplate.title
+        ProjectName: data.projectTemplate.title || null,
+        
+        // Board <- projectTemplate.metaData.board
+        Board: data.projectTemplate.metaData?.board || null,
+        
+        // Medium <- projectTemplate.metaData.medium
+        Medium: data.projectTemplate.metaData?.medium || null,
+        
+        // Subject <- projectTemplate.metaData.subject
+        Subject: data.projectTemplate.metaData?.subject || null,
+        
+        // Grade <- projectTemplate.metaData.class
+        Grade: data.projectTemplate.metaData?.class || null,
+        
+        // Type <- projectTemplate.metaData.type
+        Type: data.projectTemplate.metaData?.type || null,
+        
+        // StartDate <- program.startDate
+        StartDate: parseDate(data.program?.startDate),
+        
+        // EndDate <- program.endDate
+        EndDate: parseDate(data.program?.endDate),
+        
+        // CreatedBy <- null (as per mapping)
+        CreatedBy: null,
+        
+        // TenantId and AcademicYear are default - no need to handle
+      };
+
+      console.log(
+        `[TransformService] Transformed project data: ProjectId=${transformedData.ProjectId}, ProjectName=${transformedData.ProjectName}`
+      );
+
+      return transformedData;
+    } catch (error) {
+      console.error('Error transforming project data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project tasks data from Kafka event to ProjectTask entity format
+   */
+  async transformProjectTasksData(data: any): Promise<Partial<ProjectTask>[]> {
+    try {
+      // Validate required fields
+      if (!data.solution?.solutionId) {
+        throw new Error('Solution ID is required for project tasks');
+      }
+      if (!data.projectTemplateTasks || !Array.isArray(data.projectTemplateTasks)) {
+        throw new Error('Project template tasks array is required');
+      }
+
+      const projectId = data.solution.solutionId;
+      const tasks = data.projectTemplateTasks;
+
+      // Build a map of externalId -> _id for parent lookups
+      const externalIdToIdMap: Record<string, string> = {};
+      tasks.forEach((task: any) => {
+        if (task.externalId && task._id) {
+          externalIdToIdMap[task.externalId] = task._id;
+        }
+      });
+
+      // Helper to safely parse dates
+      const parseDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null;
+        try {
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+          console.warn(`Failed to parse date: ${dateValue}`);
+          return null;
+        }
+      };
+
+      // Transform each task
+      const transformedTasks: Partial<ProjectTask>[] = tasks.map((task: any) => {
+        // Determine ParentId by looking up the _id of the parent task
+        let parentId: string | null = null;
+        if (task.parentTaskId) {
+          // parentTaskId contains the externalId of the parent
+          parentId = externalIdToIdMap[task.parentTaskId] || null;
+        }
+
+        const transformedTask: Partial<ProjectTask> = {
+          // ProjectTaskId <- task._id
+          ProjectTaskId: task._id,
+          
+          // ProjectId <- solutionId
+          ProjectId: projectId,
+          
+          // TaskName <- task.name
+          TaskName: task.name || null,
+          
+          // ParentId <- _id of the parent task (looked up via parentTaskId -> externalId mapping)
+          ParentId: parentId,
+          
+          // StartDate <- task.startDate
+          StartDate: parseDate(task.startDate),
+          
+          // EndDate <- task.endDate
+          EndDate: parseDate(task.endDate),
+          
+          // LearningResource <- task.learningResources (as JSON)
+          LearningResource: task.learningResources || null,
+          
+          // CreatedBy <- null
+          CreatedBy: null,
+          
+          // UpdatedBy <- null
+          UpdatedBy: null,
+          
+          // CreatedAt and UpdatedAt will use database defaults
+        };
+
+        return transformedTask;
+      });
+
+      console.log(
+        `[TransformService] Transformed ${transformedTasks.length} project tasks for ProjectId=${projectId}`
+      );
+
+      return transformedTasks;
+    } catch (error) {
+      console.error('Error transforming project tasks data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Transform project sync data to ProjectTaskTracking records
+   * Only processes tasks with status === 'completed'
+   */
+  async transformProjectTaskTrackingData(data: any): Promise<Partial<ProjectTaskTracking>[]> {
+    try {
+      // Validate required fields
+      if (!data.solutionId) {
+        throw new Error('Solution ID is required for project task tracking');
+      }
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Tasks array is required');
+      }
+
+      const projectId = data.solutionId;
+      const cohortId = data.entityId || null;
+      const trackingRecords: Partial<ProjectTaskTracking>[] = [];
+
+      console.log(
+        `[TransformService] Processing project task tracking for ProjectId=${projectId}, total tasks=${data.tasks.length}`
+      );
+
+      // Iterate through each task
+      for (const task of data.tasks) {
+        // Check if parent task is completed
+        if (task.status?.toLowerCase() === 'completed' && task.referenceId) {
+          const trackingRecord: Partial<ProjectTaskTracking> = {
+            ProjectTaskTrackingId: uuidv4(), // Generate unique ID
+            ProjectId: projectId,
+            ProjectTaskId: task.referenceId, // Use referenceId as the task identifier
+            CohortId: cohortId,
+            CreatedBy: task.updatedBy || null,
+            UpdatedBy: task.updatedBy || null,
+          };
+
+          trackingRecords.push(trackingRecord);
+
+          console.log(
+            `[TransformService] Added parent task: ${task.name} (referenceId=${task.referenceId})`
+          );
+        }
+
+        // Check children tasks if they exist
+        if (task.children && Array.isArray(task.children)) {
+          for (const child of task.children) {
+            if (child.status?.toLowerCase() === 'completed' && child.referenceId) {
+              const childTrackingRecord: Partial<ProjectTaskTracking> = {
+                ProjectTaskTrackingId: uuidv4(), // Generate unique ID
+                ProjectId: projectId,
+                ProjectTaskId: child.referenceId, // Use child's referenceId
+                CohortId: cohortId,
+                CreatedBy: child.updatedBy || null,
+                UpdatedBy: child.updatedBy || null,
+              };
+
+              trackingRecords.push(childTrackingRecord);
+
+              console.log(
+                `[TransformService] Added child task: ${child.name} (referenceId=${child.referenceId})`
+              );
+            }
+          }
+        }
+      }
+
+      console.log(
+        `[TransformService] Transformed ${trackingRecords.length} completed task tracking records for ProjectId=${projectId}`
+      );
+
+      return trackingRecords;
+    } catch (error) {
+      console.error('Error transforming project task tracking data:', error);
       throw error;
     }
   }
