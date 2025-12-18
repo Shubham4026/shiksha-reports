@@ -922,6 +922,134 @@ export class TransformService {
   }
 
   /**
+   * Transform project task update data from direct message to ProjectTask entity format
+   * Handles both parent tasks and nested children
+   */
+  async transformProjectTaskUpdateData(data: any): Promise<Partial<ProjectTask>[]> {
+    try {
+      // Validate required fields
+      if (!data.solutionId) {
+        throw new Error('Solution ID is required for project task update');
+      }
+      if (!data.tasks || !Array.isArray(data.tasks)) {
+        throw new Error('Tasks array is required');
+      }
+
+      const projectId = data.solutionId;
+      const allTasks: Partial<ProjectTask>[] = [];
+
+      console.log(
+        `[TransformService] Processing project task update for ProjectId=${projectId}, total parent tasks=${data.tasks.length}`
+      );
+
+      // Helper to safely parse dates (handles DD-MM-YYYY format)
+      const parseDate = (dateValue: any): Date | null => {
+        if (!dateValue) return null;
+        try {
+          // Check if it's a DD-MM-YYYY format string
+          if (typeof dateValue === 'string' && dateValue.includes('-')) {
+            const parts = dateValue.split('-');
+            if (parts.length === 3) {
+              const day = parseInt(parts[0], 10);
+              const month = parseInt(parts[1], 10);
+              const year = parseInt(parts[2], 10);
+              
+              // Validate the parts
+              if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                // Create date with month-1 (JavaScript months are 0-indexed)
+                const parsed = new Date(year, month - 1, day);
+                return isNaN(parsed.getTime()) ? null : parsed;
+              }
+            }
+          }
+          
+          // Fallback to standard Date parsing
+          const parsed = new Date(dateValue);
+          return isNaN(parsed.getTime()) ? null : parsed;
+        } catch (error) {
+          return null;
+        }
+      };
+
+      // Process each parent task and its children
+      for (const task of data.tasks) {
+        // Skip tasks without referenceId
+        if (!task.referenceId) {
+          console.warn(
+            `[TransformService] Skipping task without referenceId: ${task.name || task._id}`
+          );
+          continue;
+        }
+
+        // Extract dates from metaInformation if available, otherwise from task directly
+        const startDate = parseDate(
+          task.metaInformation?.startDate || task.startDate
+        );
+        const endDate = parseDate(
+          task.metaInformation?.endDate || task.endDate
+        );
+
+        // Transform parent task
+        const parentTask: Partial<ProjectTask> = {
+          ProjectTaskId: task.referenceId, // Use referenceId for matching
+          ProjectId: projectId,
+          TaskName: task.name || null,
+          ParentId: null, // Parent tasks have no parent
+          StartDate: startDate,
+          EndDate: endDate,
+          LearningResource: task.learningResources || null,
+          CreatedBy: task.createdBy || null,
+          UpdatedBy: task.updatedBy || null,
+        };
+        allTasks.push(parentTask);
+
+        // Process children if they exist
+        if (task.children && Array.isArray(task.children)) {
+          for (const child of task.children) {
+            // Skip children without referenceId
+            if (!child.referenceId) {
+              console.warn(
+                `[TransformService] Skipping child task without referenceId: ${child.name || child._id}`
+              );
+              continue;
+            }
+
+            // Extract dates from child's metaInformation
+            const childStartDate = parseDate(
+              child.metaInformation?.startDate || child.startDate
+            );
+            const childEndDate = parseDate(
+              child.metaInformation?.endDate || child.endDate
+            );
+
+            const childTask: Partial<ProjectTask> = {
+              ProjectTaskId: child.referenceId, // Use referenceId for matching
+              ProjectId: projectId,
+              TaskName: child.name || null,
+              ParentId: task.referenceId, // Reference parent by referenceId
+              StartDate: childStartDate,
+              EndDate: childEndDate,
+              LearningResource: child.learningResources || null,
+              CreatedBy: child.createdBy || null,
+              UpdatedBy: child.updatedBy || null,
+            };
+            allTasks.push(childTask);
+          }
+        }
+      }
+
+      console.log(
+        `[TransformService] Transformed ${allTasks.length} tasks (including children) for ProjectId=${projectId}`
+      );
+
+      return allTasks;
+    } catch (error) {
+      console.error('Error transforming project task update data:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Transform project sync data to ProjectTaskTracking records
    * Only processes tasks with status === 'completed'
    */

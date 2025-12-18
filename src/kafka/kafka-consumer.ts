@@ -318,6 +318,8 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
       case 'PROJECT_SYNC_CREATED':
       case 'PROJECT_SYNC_UPDATED':
         return this.projectHandler.handleProjectSyncUpdate(data);
+      case 'PROJECT_TASK_UPDATED':
+        return this.projectHandler.handleProjectTaskUpdate(data);
       default:
         this.logger.warn(`Unhandled project eventType: ${eventType}`);
     }
@@ -337,6 +339,14 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
             `Inferred event type: ${eventType} for topic: ${topic}`,
           );
           await this.handleProjectEvent(eventType, message);
+          break;
+
+        case 'project-update-topic':
+          // Handle project task updates
+          this.logger.log(
+            `Processing PROJECT_TASK_UPDATED event from topic: ${topic}`,
+          );
+          await this.handleProjectEvent('PROJECT_TASK_UPDATED', message);
           break;
 
         default:

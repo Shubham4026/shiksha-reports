@@ -122,5 +122,78 @@ export class ProjectHandler {
       throw error;
     }
   }
+
+  async handleProjectTaskUpdate(data: any) {
+    try {
+      // Validate required fields
+      validateRequired(data.solutionId, 'Solution ID (solutionId)');
+      validateString(data.solutionId, 'solutionId');
+      validateRequired(data.tasks, 'Tasks array');
+
+      console.log(
+        `[ProjectHandler] Processing project task update: solutionId=${data.solutionId}, totalTasks=${data.tasks?.length || 0}`
+      );
+
+      // Transform incoming tasks to ProjectTask entity format
+      const incomingTasks = await this.transformService.transformProjectTaskUpdateData(data);
+      const incomingTaskIds = new Set(incomingTasks.map(t => t.ProjectTaskId));
+
+      console.log(
+        `[ProjectHandler] Transformed ${incomingTasks.length} tasks (including children)`
+      );
+
+      // Get existing tasks from database
+      const existingTasks = await this.dbService.getProjectTasksByProjectId(data.solutionId);
+      const existingTaskIds = new Set(existingTasks.map(t => t.ProjectTaskId));
+
+      console.log(
+        `[ProjectHandler] Found ${existingTasks.length} existing tasks in database`
+      );
+
+      // Identify tasks to delete (exist in DB but not in incoming message)
+      const tasksToDelete = existingTasks
+        .filter(task => !incomingTaskIds.has(task.ProjectTaskId))
+        .map(task => task.ProjectTaskId);
+
+      // Delete removed tasks if any
+      let deletedCount = 0;
+      if (tasksToDelete.length > 0) {
+        console.log(
+          `[ProjectHandler] Deleting ${tasksToDelete.length} removed tasks`
+        );
+        const deleteResult = await this.dbService.deleteProjectTasks(tasksToDelete);
+        deletedCount = deleteResult.affected || 0;
+        console.log(
+          `[ProjectHandler] Deleted ${deletedCount} tasks`
+        );
+      }
+
+      // Upsert all incoming tasks (insert new + update existing)
+      const upsertResult = await this.dbService.upsertProjectTasks(incomingTasks);
+
+      console.log(
+        `[ProjectHandler] Project task update complete: projectId=${data.solutionId}, upserted=${upsertResult.count}, deleted=${deletedCount}`
+      );
+
+      return {
+        success: true,
+        projectId: data.solutionId,
+        totalIncomingTasks: incomingTasks.length,
+        tasksUpserted: upsertResult.count,
+        tasksDeleted: deletedCount,
+        existingTasksCount: existingTasks.length,
+      };
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        console.error(
+          'Validation failed in handleProjectTaskUpdate:',
+          error.message,
+        );
+        throw new Error(`Validation failed: ${error.message}`);
+      }
+      console.error('Error handling project task update:', error);
+      throw error;
+    }
+  }
 }
 

@@ -903,6 +903,22 @@ export class DatabaseService {
     });
   }
 
+  async getProjectTasksByProjectId(projectId: string): Promise<ProjectTask[]> {
+    return this.projectTaskRepo.find({
+      where: { ProjectId: projectId },
+    });
+  }
+
+  async deleteProjectTasks(taskIds: string[]) {
+    if (!taskIds || taskIds.length === 0) {
+      return { affected: 0 };
+    }
+    this.logger.log(
+      `[DatabaseService] Deleting ${taskIds.length} project tasks`,
+    );
+    return this.projectTaskRepo.delete(taskIds);
+  }
+
   async upsertProjectTask(taskData: Partial<ProjectTask>) {
     try {
       // Use database-level upsert with ON CONFLICT
